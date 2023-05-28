@@ -1,0 +1,212 @@
+import tkinter as tk  # Importing the tkinter library for GUI
+from tkinter import messagebox  # Importing the messagebox module from tkinter
+import openpyxl  # Importing openpyxl for working with Excel files
+from openpyxl import Workbook  # Importing the Workbook class from openpyxl
+from openpyxl.styles import PatternFill, Border, Side  # Importing styles from openpyxl
+from openpyxl.utils import get_column_letter  # Importing utility functions from openpyxl
+
+# Class to represent a task
+class Task:
+    def __init__(self, name, ot, mpt, pt, dependencies=[]):
+        self.name = name
+        self.ot = ot
+        self.mpt = mpt
+        self.pt = pt
+        et = (ot + 4 * mpt + pt) / 6
+        self.estimated_time = int(et + 0.4)  # Round up to the nearest whole number
+        self.dependencies = dependencies
+        self.es = 0
+        self.ef = 0
+        self.ls = 0
+        self.lf = 0
+        self.s = 0
+
+    def __str__(self):
+        return f"{self.name}  {self.dependencies}       {self.ot}  {self.mpt}  {self.pt}  {self.estimated_time}   {self.es}  {self.ef}  {self.ls}  {self.lf}  {self.s}"
+
+def backward_pass(tasks):
+    # Perform backwards pass to calculate LS and LF for each task
+
+    # Find the task with the latest finish time (EF) among all tasks
+    end_task = max(tasks.values(), key=lambda x: x.ef)
+    end_task.lf = end_task.ef
+    end_task.ls = end_task.ef - end_task.estimated_time
+
+    # Iterate over tasks in reverse order (except the end task)
+    for task in reversed(list(tasks.values())):
+        if task == end_task:
+            continue
+
+        # Get the LF values of successor tasks that depend on the current task
+        lf_values = [tasks[succ].ls for succ in tasks if task.name in tasks[succ].dependencies]
+
+        # If there are LF values, set the LF of the current task as the minimum LF value
+        if lf_values:
+            task.lf = min(lf_values)
+        else:
+            # If there are no LF values, set the LF of the current task as the EF of the end task
+            task.lf = end_task.ef
+
+        # Set the LS of the current task as LF minus estimated time
+        task.ls = task.lf - task.estimated_time
+
+def forward_pass(tasks):
+    # Perform forward pass to calculate ES and EF for each task
+
+    # Find the task with the earliest start time (ES) among all tasks
+    start_task = min(tasks.values(), key=lambda x: x.es)
+    start_task.es = 0
+    start_task.ef = start_task.estimated_time
+
+    # Iterate over tasks in ascending order of ES (except the start task)
+    for task in sorted(list(tasks.values()), key=lambda x: x.es):
+        if task == start_task:
+            continue
+
+        # Get the EF values of predecessor tasks on which the current task depends
+        es_values = [tasks[dep].ef for dep in task.dependencies if dep in tasks]
+
+        # If there are EF values, set the ES of the current task as the maximum EF value
+        if es_values:
+            task.es = max(es_values)
+        else:
+            # If there are no EF values, set the ES of the current task as 0
+            task.es = 0
+
+        # Set the EF of the current task as ES plus estimated time
+        task.ef = task.es + task.estimated_time
+
+def compute_slack(tasks):
+    for task in tasks.values():
+        task.s = task.lf - task.ef
+
+def compute_tasks(tasks):
+    forward_pass(tasks)
+    backward_pass(tasks)
+    compute_slack(tasks)
+
+def create_gantt_chart(data, chart_sheet):
+    # Calculate the maximum value for the chart's x-axis
+    max_finish = max(task[2] for task in data)
+
+    # Set cell colors and labels to create Gantt chart
+    for row_num, task in enumerate(data, 2):
+        start = task[1]
+        finish = task[2]
+        label_cell = chart_sheet.cell(row=row_num, column=1)
+        label_cell.value = task[0]
+        start_color = 255 - int((start / max_finish) * 255)  # Calculate start color value
+        end_color = 255 - int((finish / max_finish) * 255)  # Calculate end color value
+        fill = PatternFill(start_color=f"FF{start_color:02X}00", end_color=f"FF{end_color:02X}00", fill_type="solid")
+        for col_num in range(start + 2, finish + 2):
+            col_letter = get_column_letter(col_num)
+            cell = chart_sheet[f"{col_letter}{row_num}"]
+            cell.fill = fill
+
+        chart_sheet.merge_cells(start_row=row_num, start_column=start + 2, end_row=row_num, end_column=finish + 1)
+        task_name_cell = chart_sheet.cell(row=row_num, column=start + 2)
+        task_name_cell.value = task[0]
+        task_name_cell.alignment = openpyxl.styles.Alignment(horizontal='center', vertical='center')
+
+        column_letter = get_column_letter(finish + 2)
+        chart_sheet.column_dimensions[column_letter].width = 12
+
+    chart_sheet["A1"] = "Task"
+    chart_sheet["B1"] = "Start"
+    chart_sheet.cell(row=1, column=max_finish + 2).value = "Finish"
+
+    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    chart_sheet.border = border
+
+def use_defined_tasks():
+    global choice
+    choice = "y"
+    root.destroy()
+
+def use_custom_tasks():
+    global choice
+    choice = "n"
+    root.destroy()
+
+# Create Tkinter window
+root = tk.Tk()
+root.title("Task Selection")
+
+# Create label and buttons
+label = tk.Label(root, text="Choose an option:")
+label.pack(pady=10)
+
+defined_tasks_button = tk.Button(root, text="Use Defined Tasks", command=use_defined_tasks)
+defined_tasks_button.pack(pady=5)
+
+custom_tasks_button = tk.Button(root, text="Input Custom Tasks", command=use_custom_tasks)
+custom_tasks_button.pack(pady=5)
+
+# Run the Tkinter event loop
+root.mainloop()
+
+if choice.lower() == "y":
+    # Use the defined tasks
+    tasks = {
+        "A": Task("A", 2, 3, 4, []),
+        "B": Task("B", 3, 7, 7, []),
+        "C": Task("C", 1, 2, 3, ["A", "B"]),
+        "D": Task("D", 1, 3, 15, ["C"]),
+        "E": Task("E", 2, 3, 9, ["C"]),
+        "F": Task("F", 0, 4, 4, ["D", "E"]),
+        "G": Task("G", 6, 8, 15, ["E"]),
+        "H": Task("H", 2, 2, 7, ["F", "G"])
+    }
+else:
+    # Input custom tasks
+    tasks = {}
+    task_names = input("Input tasks (separated by commas): ").split(",")
+
+    for task_name in task_names:
+        while True:
+            try:
+                print(f"\nEnter details for task {task_name}:")
+                ot = int(input("Enter the OT (Optimistic Time): "))
+                mpt = int(input("Enter the MPT (Most Probable Time): "))
+                pt = int(input("Enter the PT (Pessimistic Time): "))
+
+                dependency_input = input("Enter the dependencies (separated by commas, leave blank if none): ")
+                dependencies = [dep.strip() for dep in dependency_input.split(",") if dep.strip()]
+
+                tasks[task_name] = Task(task_name, ot, mpt, pt, dependencies)
+                break
+
+            except ValueError:
+                print("Invalid input. Please enter a valid integer.")
+
+# Compute the tasks
+compute_tasks(tasks)
+
+# Print the tasks table
+print("Task        Dependencies    OT  MPT  PT  Estimated Time  ES  EF  LS  LF  Slack")
+for task in tasks.values():
+    print(task)
+
+# Create Excel workbook
+wb = Workbook()
+
+# Create Task sheet and add tasks table
+task_sheet = wb.active
+task_sheet.title = "Tasks"
+task_sheet.append([
+    "Task", "Dependencies", "OT", "MPT", "PT", "Estimated Time", "ES", "EF", "LS", "LF", "Slack"
+])
+for task in tasks.values():
+    task_sheet.append([
+        task.name, ", ".join(task.dependencies), task.ot, task.mpt, task.pt, task.estimated_time,
+        task.es, task.ef, task.ls, task.lf, task.s
+    ])
+
+# Create Gantt Chart sheet and add Gantt chart
+chart_sheet = wb.create_sheet(title="Gantt Chart")
+chart_data = []
+for task in tasks.values():
+    chart_data.append([task.name, task.es, task.ef])
+create_gantt_chart(chart_data, chart_sheet)
+# Save the workbook
+wb.save("task_and_gantt.xlsx")
