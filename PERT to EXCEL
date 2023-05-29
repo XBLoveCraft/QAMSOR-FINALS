@@ -210,3 +210,5 @@ for task in tasks.values():
 create_gantt_chart(chart_data, chart_sheet)
 # Save the workbook
 wb.save("task_and_gantt.xlsx")
+
+-Sean Mijares
